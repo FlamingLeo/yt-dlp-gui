@@ -15,3 +15,4 @@ first place. That's why I finally decided to do a complete rewrite and expand up
 and a half later.
 
 For legacy purposes, I uploaded the last version unchanged before the rewrite in the legacy folder.
+In order to use the legacy version, the yt-dlp executable must be in the same directory as the Python script.
