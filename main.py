@@ -12,20 +12,23 @@ import sys
 
 class Logger:
     def debug(self, msg):
-        log_listbox.insert(END, msg)
-        log_listbox.yview(END)
+        if log_info.get():
+            log_listbox.insert(END, msg)
+            log_listbox.yview(END)
 
     def info(self, msg):
-        log_listbox.insert(END, msg)
-        log_listbox.yview(END)
+        # ???
+        pass
 
     def warning(self, msg):
-        log_listbox.insert(END, msg)
-        log_listbox.yview(END)
+        if log_warn.get():
+            log_listbox.insert(END, msg)
+            log_listbox.yview(END)
 
     def error(self, msg):
-        log_listbox.insert(END, msg)
-        log_listbox.yview(END)
+        if log_err.get():
+            log_listbox.insert(END, msg)
+            log_listbox.yview(END)
 
 
 # dropdown lists
@@ -97,12 +100,28 @@ FIXUP_POLICIES = [
     'force'
 ]
 
-VERSION = 2.0
+VERSION = 2.1
+DUMMY_VIDEO = "https://www.youtube.com/watch?v=Vhh_GeBPOhs"
 
 download_archive_path = ""
 cookie_file_path = ""
 certfile_path = ""
 private_key_path = ""
+
+download_threads = []
+
+
+def update_active_count(d):
+    """
+    Updates the active download count when finished downloading a video.
+    This functions gets called after post-processing is done and works by displaying
+    the number of active download threads minus one (the current one, which is basically
+    done after post-processing anway).
+
+    There's probably better ways of doing this.
+    """
+    check_active_downloads(-1)
+
 
 # default ytdlp options
 yt_dlp_opts = {'extract_flat': 'discard_in_playlist',
@@ -113,7 +132,9 @@ yt_dlp_opts = {'extract_flat': 'discard_in_playlist',
                                    'when': 'playlist'}],
                'retries': 10,
                'logger': Logger(),
-               'noplaylist': True}
+               'noplaylist': True,
+               'postprocessor_hooks': [update_active_count]
+               }
 
 
 def about():
@@ -123,7 +144,7 @@ def about():
     messagebox.showinfo(
         "About YT-DLP-GUI", "YT-DLP-GUI: A graphical user interface for YT-DLP.\n" +
         "Developed by FlamingLeo, 2021 - 2024.\n\n" +
-        "Version 2.0, finished 07.03.2024.\nMade using Python and tkinter.\n\n" + 
+        f"Version {VERSION}, finished 07.03.2024.\nMade using Python and tkinter.\n\n" +
         "GitHub (YT-DLP): \nhttps://github.com/yt-dlp/yt-dlp")
 
 
@@ -197,6 +218,9 @@ def entrybox_rightclick(option):
 
 
 def url_queue_rightclick(e):
+    """
+    URL queue rightclick menu.
+    """
     global url_queue_selection
     url_queue_selection = url_queue.identify_row(e.y)
     url_queue_rightclickmenu.tk_popup(e.x_root, e.y_root)
@@ -505,8 +529,26 @@ def download():
             download_thread = threading.Thread(
                 target=ydl.download, args=[urls])
             download_thread.start()
+            download_threads.append(download_thread)
     except Exception as e:
         log_listbox.insert(END, e)
+    check_active_downloads()
+
+
+def download_url(link):
+    """
+    Check parameters, then download URL passed as parameter using YT-DLP. Multithreaded.
+    """
+    check_parameters()
+    try:
+        with yt_dlp.YoutubeDL(yt_dlp_opts) as ydl:
+            download_thread = threading.Thread(
+                target=ydl.download, args=[link])
+            download_thread.start()
+            download_threads.append(download_thread)
+    except Exception as e:
+        log_listbox.insert(END, e)
+    check_active_downloads()
 
 
 def ui_toggle_dropdowns(category):
@@ -553,6 +595,36 @@ def ui_insert_path():
     outputpath_entry.insert(0, filedialog.askdirectory())
 
 
+def check_on_close():
+    """
+    Checks for active downloads on close.
+    If there are still ongoing downloads, warn the user about closing the program.
+    """
+    running_threads = False
+    for thread in download_threads:
+        if thread.is_alive():
+            running_threads = True
+            break
+
+    if running_threads:
+        if messagebox.askokcancel("Ongoing Downloads", "There are still downloads in progress.\nAre you sure you want to quit?"):
+            root.destroy()
+    else:
+        root.destroy()
+
+
+def check_active_downloads(modifier=None):
+    """
+    Checks the amount of active downloads by checking active downloader thread 
+    count and updates log label. Optional modifier to change actual count.
+    """
+    count = int(0 if modifier is None else modifier)
+    for thread in download_threads:
+        if thread.is_alive():
+            count += 1
+    log_active_label.config(text=f"Active Threads: {count if count >= 0 else 0}")
+
+
 """
 TKinter logic begins here.
 """
@@ -567,6 +639,8 @@ root.config(menu=menu_bar)
 file_menu = Menu(menu_bar, tearoff=False)
 menu_bar.add_cascade(label="File", menu=file_menu)
 file_menu.add_command(label="Set Output Path", command=ui_insert_path)
+file_menu.add_command(label="Download Test Video",
+                      command=lambda: download_url(DUMMY_VIDEO))
 file_menu.add_separator()
 file_menu.add_command(label="Exit", command=root.quit)
 
@@ -682,7 +756,7 @@ log_frame_inner = Frame(log_frame)
 log_frame_inner.pack()
 log_frame_scrollbar = ttk.Scrollbar(log_frame_inner)
 log_frame_scrollbar.pack(side=RIGHT, fill=Y)
-log_listbox = Listbox(log_frame_inner, width=58, height=6,
+log_listbox = Listbox(log_frame_inner, width=58, height=5,
                       yscrollcommand=log_frame_scrollbar.set)
 log_listbox.pack()
 
@@ -691,6 +765,22 @@ log_rightclickmenu.add_command(
     label="Clear", command=lambda: log_listbox.delete(0, END))
 log_listbox.bind(
     "<Button-3>", lambda e: log_rightclickmenu.tk_popup(e.x_root, e.y_root))
+
+log_info = IntVar(value=1)
+log_warn = IntVar(value=1)
+log_err = IntVar(value=1)
+
+log_info_checkbox = ttk.Checkbutton(
+    log_frame, text="Information", variable=log_info)
+log_info_checkbox.pack(padx=5, side=LEFT)
+log_warnings_checkbox = ttk.Checkbutton(
+    log_frame, text="Warnings", variable=log_warn)
+log_warnings_checkbox.pack(padx=5, side=LEFT)
+log_error_checkbox = ttk.Checkbutton(
+    log_frame, text="Errors", variable=log_err)
+log_error_checkbox.pack(padx=5, side=LEFT)
+log_active_label = ttk.Label(log_frame, text="Active Threads: 0")
+log_active_label.pack(side=RIGHT)
 
 download_button = ttk.Button(
     general_frame, text="Download", image=pixel, compound="c", width=63, command=download)
@@ -1087,4 +1177,5 @@ postprocessing_fixup_dropdown.grid(padx=5, sticky=E, row=4, column=1)
 """
 DONE!
 """
+root.protocol("WM_DELETE_WINDOW", check_on_close)
 root.mainloop()
