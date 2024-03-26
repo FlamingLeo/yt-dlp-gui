@@ -8,27 +8,14 @@ import validators
 import yt_dlp
 import threading
 import sys
+import os
+import pip
 
 
 class Logger:
-    def debug(self, msg):
-        if log_info.get():
-            log_listbox.insert(END, msg)
-            log_listbox.yview(END)
-
-    def info(self, msg):
-        # ???
-        pass
-
-    def warning(self, msg):
-        if log_warn.get():
-            log_listbox.insert(END, msg)
-            log_listbox.yview(END)
-
-    def error(self, msg):
-        if log_err.get():
-            log_listbox.insert(END, msg)
-            log_listbox.yview(END)
+    def debug(self, msg): return log_if_option_chosen(log_info, msg)
+    def warning(self, msg): return log_if_option_chosen(log_warn, msg)
+    def error(self, msg): return log_if_option_chosen(log_err, msg)
 
 
 # dropdown lists
@@ -100,8 +87,10 @@ FIXUP_POLICIES = [
     'force'
 ]
 
-VERSION = 2.1
+VERSION = "2.2"
+DATE = "26.03.2024"
 DUMMY_VIDEO = "https://www.youtube.com/watch?v=Vhh_GeBPOhs"
+CONCURRENT_LIMIT = 10
 
 download_archive_path = ""
 cookie_file_path = ""
@@ -109,18 +98,6 @@ certfile_path = ""
 private_key_path = ""
 
 download_threads = []
-
-
-def update_active_count(d):
-    """
-    Updates the active download count when finished downloading a video.
-    This functions gets called after post-processing is done and works by displaying
-    the number of active download threads minus one (the current one, which is basically
-    done after post-processing anway).
-
-    There's probably better ways of doing this.
-    """
-    check_active_downloads(-1)
 
 
 # default ytdlp options
@@ -132,8 +109,7 @@ yt_dlp_opts = {'extract_flat': 'discard_in_playlist',
                                    'when': 'playlist'}],
                'retries': 10,
                'logger': Logger(),
-               'noplaylist': True,
-               'postprocessor_hooks': [update_active_count]
+               'noplaylist': True
                }
 
 
@@ -144,8 +120,46 @@ def about():
     messagebox.showinfo(
         "About YT-DLP-GUI", "YT-DLP-GUI: A graphical user interface for YT-DLP.\n" +
         "Developed by FlamingLeo, 2021 - 2024.\n\n" +
-        f"Version {VERSION}, finished 07.03.2024.\nMade using Python and tkinter.\n\n" +
+        f"Version {VERSION}, finished {DATE}.\nMade using Python and tkinter.\n\n" +
         "GitHub (YT-DLP): \nhttps://github.com/yt-dlp/yt-dlp")
+
+
+def update_ytdlp():
+    """
+    Upgrades the yt-dlp module with pip.
+    Not recommended.
+    """
+    pip.main(['install', '--upgrade', "yt_dlp"])
+    insert_into_log("[pip] Updated yt_dlp... (pip install yt-dlp -U)")
+
+
+def save_logs():
+    """
+    Saves the logs to an external text file in the same directory as the program.
+    """
+    try:
+        if log_listbox.size():
+            with open("logs.txt", "w") as file:
+                for listbox_entry in enumerate(log_listbox.get(0, END)):
+                    file.write(listbox_entry[1] + "\n")
+    except:
+        pass
+
+
+def insert_into_log(msg):
+    """
+    Logs a message and moves the scrollbar to the bottom.
+    """
+    log_listbox.insert(END, msg)
+    log_listbox.yview(END)
+
+
+def log_if_option_chosen(opt, msg):
+    """
+    Logs a message if the parameter is chosen.
+    """
+    if opt.get():
+        insert_into_log(msg)
 
 
 def add_to_queue(link=None):
@@ -177,6 +191,20 @@ def clear_queue():
     Clears the entire URL queue.
     """
     url_queue.delete(*url_queue.get_children())
+
+
+def export_queue():
+    """
+    Exports URLs from queue to a text file.
+    """
+    try:
+        urls = url_queue.get_children()
+        if urls != ():
+            with open("queue.txt", "w") as file:
+                    for url in urls:
+                        file.write(url + "\n")
+    except:
+        pass
 
 
 def import_queue():
@@ -337,14 +365,26 @@ def get_date():
         return yt_dlp.DateRange('20050101', 'today')
 
 
-def safe_integer(intstring, fallback):
+def convert_to_number(value, fallback):
     """
-    Helper method to check if string containing integer can be correctly converted to an integer.
+    Helper method to convert number with prefixes to integer.
+    For example, 50K becomes 50.000, 1M becomes 1.000.000 and so on.
 
-    Otherwise, return fallback value.
+    If the function fails, it returns a fallback value.
     """
+    prefixes = {
+        'K': 10**3,
+        'M': 10**6,
+        'B': 10**9
+    }
+
     try:
-        return int(intstring)
+        if value[-1].upper() in prefixes:
+            prefix = value[-1].upper()
+            number = float(value[:-1]) * prefixes[prefix]
+            return int(number)
+        else:
+            return int(value)
     except:
         return fallback
 
@@ -363,6 +403,9 @@ def check_parameters():
     Checks ALL chosen parameters (entry boxes, radio boxes, dropdown menus...)
     and updates the yt-dlp option dictionary accordingly.
     """
+    # verbosity
+    yt_dlp_opts.update({"verbose": log_verbose.get()})
+
     # video: format
     # format_opt -> which format type to choose
     # format_name -> format as name (best, worst...)
@@ -392,12 +435,12 @@ def check_parameters():
 
     # video: limits
     insert_if_not_empty(limits_agelimit_entry.get(),
-                        "age_limit", safe_integer(limits_agelimit_entry.get(), 99))
+                        "age_limit", convert_to_number(limits_agelimit_entry.get(), 99))
     if limits_daterange_min_entry.get() or limits_daterange_max_entry.get():
         yt_dlp_opts.update({"daterange": get_date()})
     insert_if_not_empty(limits_viewrange_min_entry.get(
-    ), "min_views", safe_integer(limits_viewrange_min_entry.get(), 0))
-    insert_if_not_empty(limits_viewrange_max_entry.get(), "max_views", safe_integer(
+    ), "min_views", convert_to_number(limits_viewrange_min_entry.get(), 0))
+    insert_if_not_empty(limits_viewrange_max_entry.get(), "max_views", convert_to_number(
         limits_viewrange_max_entry.get(), sys.maxsize))
 
     # video: output
@@ -407,21 +450,20 @@ def check_parameters():
                         {"default": outputoptions_entry.get()})
 
     # downloads: values
-    # TODO: allow prefixes such as "K" or "M"
-    insert_if_not_empty(download_ratelimit_entry.get(), "ratelimit", safe_integer(
-        download_ratelimit_entry.get(), sys.maxsize))
-    insert_if_not_empty(download_retries_entry.get(), "retries", safe_integer(
+    insert_if_not_empty(download_ratelimit_entry.get(
+    ), "ratelimit", convert_to_number(download_ratelimit_entry.get(), sys.maxsize))
+    insert_if_not_empty(download_retries_entry.get(), "retries", convert_to_number(
         download_retries_entry.get(), sys.maxsize))
     insert_if_not_empty(download_fragments_entry.get(), "concurrent_fragment_downloads",
-                        safe_integer(download_fragments_entry.get(), sys.maxsize))
+                        convert_to_number(download_fragments_entry.get(), sys.maxsize))
     insert_if_not_empty(download_max_downloads_entry.get(), "max_downloads",
-                        safe_integer(download_max_downloads_entry.get(), sys.maxsize))
+                        convert_to_number(download_max_downloads_entry.get(), sys.maxsize))
     insert_if_not_empty(download_extractors_entry.get(), "allowed_extractors", list(
         map(lambda x: x.strip(), download_extractors_entry.get().split(","))))
     insert_if_not_empty(download_min_filesize_entry.get(), "min_filesize",
-                        safe_integer(download_min_filesize_entry.get(), 0))
+                        convert_to_number(download_min_filesize_entry.get(), 0))
     insert_if_not_empty(download_max_filesize_entry.get(), "max_filesize",
-                        safe_integer(download_max_filesize_entry.get(), sys.maxsize))
+                        convert_to_number(download_max_filesize_entry.get(), sys.maxsize))
 
     # downloads: options
     # TODO: embed thumbnail
@@ -511,6 +553,14 @@ def check_parameters():
     yt_dlp_opts.update({"fixup": postprocessing_fixup.get()})
 
 
+def ytdl_download(urls):
+    with yt_dlp.YoutubeDL(yt_dlp_opts) as ydl:
+        download_thread = threading.Thread(
+            target=ydl.download, args=[urls])
+        download_thread.start()
+        download_threads.append(download_thread)
+
+
 def download():
     """
     Check parameters, then download URLs from queue using YT-DLP. Multithreaded.
@@ -521,18 +571,26 @@ def download():
     urls = url_queue.get_children()
     if url_entry.get() and validators.url(url_entry.get()):
         urls += (url_entry.get(), )
+    if urls == ():
+        if url_entry.get():
+            insert_into_log("[ERROR] Invalid URL!")
+        else:
+            insert_into_log("[ERROR] URL queue empty!")
+        return
+    if url_queue_parallel.get() and len(urls) > CONCURRENT_LIMIT and not url_queue_parallel_warnings.get():
+        if not messagebox.askokcancel("Large Amount of Parallel Downloads", f"You are trying to download more than {CONCURRENT_LIMIT} videos at once.\nThis may become unstable. Are you sure you want to continue?"):
+            return
     check_parameters()
     clear_queue()
     url_entry.delete(0, END)
-    try:
-        with yt_dlp.YoutubeDL(yt_dlp_opts) as ydl:
-            download_thread = threading.Thread(
-                target=ydl.download, args=[urls])
-            download_thread.start()
-            download_threads.append(download_thread)
-    except Exception as e:
-        log_listbox.insert(END, e)
-    check_active_downloads()
+    if url_queue_parallel.get():
+        for url in urls:
+            download_url(url)
+    else:
+        try:
+            ytdl_download(urls)
+        except Exception as e:
+            insert_into_log(f"[ERROR] {e}")
 
 
 def download_url(link):
@@ -541,14 +599,9 @@ def download_url(link):
     """
     check_parameters()
     try:
-        with yt_dlp.YoutubeDL(yt_dlp_opts) as ydl:
-            download_thread = threading.Thread(
-                target=ydl.download, args=[link])
-            download_thread.start()
-            download_threads.append(download_thread)
+        ytdl_download([link])
     except Exception as e:
-        log_listbox.insert(END, e)
-    check_active_downloads()
+        insert_into_log(f"[ERROR] {e}")
 
 
 def ui_toggle_dropdowns(category):
@@ -591,8 +644,10 @@ def ui_insert_path():
     """
     Inserts the chosen path into the output path entry box.
     """
-    outputpath_entry.delete(0, END)
-    outputpath_entry.insert(0, filedialog.askdirectory())
+    outputpath = filedialog.askdirectory()
+    if outputpath:
+        outputpath_entry.delete(0, END)
+        outputpath_entry.insert(0, outputpath)
 
 
 def check_on_close():
@@ -613,16 +668,22 @@ def check_on_close():
         root.destroy()
 
 
-def check_active_downloads(modifier=None):
+def on_entry_click(entry, message):
     """
-    Checks the amount of active downloads by checking active downloader thread 
-    count and updates log label. Optional modifier to change actual count.
+    Removes placeholder text specified in message parameter from given entrybox.
     """
-    count = int(0 if modifier is None else modifier)
-    for thread in download_threads:
-        if thread.is_alive():
-            count += 1
-    log_active_label.config(text=f"Active Threads: {count if count >= 0 else 0}")
+    if entry.get() == message:
+        entry.delete(0, END)
+        entry.configure(foreground="black")
+
+
+def on_focus_out(entry, message):
+    """
+    Adds placeholder text specified in message parameter from given entrybox.
+    """
+    if entry.get() == "":
+        entry.insert(0, message)
+        entry.configure(foreground="gray")
 
 
 """
@@ -656,11 +717,19 @@ url_menu.add_command(label="Clear", command=lambda: entrybox_rightclick("c"))
 queue_menu = Menu(menu_bar, tearoff=False)
 menu_bar.add_cascade(label="Queue", menu=queue_menu)
 queue_menu.add_command(label="Delete", command=lambda: delete_from_queue())
-queue_menu.add_command(label="Import from File", command=import_queue)
+queue_menu.add_command(label="Import", command=import_queue)
+queue_menu.add_command(label="Export", command=export_queue)
 queue_menu.add_command(label="Clear", command=clear_queue)
+
+logs_menu = Menu(menu_bar, tearoff=False)
+menu_bar.add_cascade(label="Logs", menu=logs_menu)
+logs_menu.add_command(label="Save Logs", command=save_logs)
+logs_menu.add_command(label="Clear Logs",
+                      command=lambda: log_listbox.delete(0, END))
 
 help_menu = Menu(menu_bar, tearoff=False)
 menu_bar.add_cascade(label="Help", menu=help_menu)
+help_menu.add_command(label="Update YT-DLP", command=update_ytdlp)
 help_menu.add_command(label="About", command=about)
 
 # tabs
@@ -720,7 +789,7 @@ url_queue_frame.pack(padx=5, pady=5, fill=BOTH, expand=1, side=BOTTOM)
 url_queue_scrollbar = ttk.Scrollbar(url_queue_frame)
 url_queue_scrollbar.pack(side=RIGHT, fill=Y)
 url_queue = ttk.Treeview(url_queue_frame, columns=(
-    'title', 'src'), show='headings', selectmode="browse", height=5, yscrollcommand=url_queue_scrollbar.set)
+    'title', 'src'), show='headings', selectmode="browse", height=3, yscrollcommand=url_queue_scrollbar.set)
 url_queue.heading('title', text='URL')
 url_queue.column('title', minwidth=20, width=265, stretch=FALSE)
 url_queue.heading('src', text='Source')
@@ -728,11 +797,26 @@ url_queue.column('src', minwidth=20, width=80, stretch=False)
 url_queue.pack()
 url_queue_scrollbar.config(command=url_queue.yview)
 
+url_queue_parallel_frame = Frame(url_frame)
+url_queue_parallel_frame.pack(fill=BOTH, expand=1, side=BOTTOM)
+
+url_queue_parallel = IntVar(value=0)
+url_queue_parallel_warnings = IntVar(value=0)
+
+url_queue_parallel_checkbutton = ttk.Checkbutton(
+    url_queue_parallel_frame, text="Download Concurrently", variable=url_queue_parallel)
+url_queue_parallel_checkbutton.pack(padx=5, side=LEFT)
+url_queue_parallel_warnings_checkbutton = ttk.Checkbutton(
+    url_queue_parallel_frame, text="Supress Warnings", variable=url_queue_parallel_warnings)
+url_queue_parallel_warnings_checkbutton.pack(padx=5, side=RIGHT)
+
 url_queue_rightclickmenu = Menu(url_queue, tearoff=False)
 url_queue_rightclickmenu.add_command(
     label="Delete", command=lambda: delete_from_queue(url_queue_selection))
 url_queue_rightclickmenu.add_command(
-    label="Import from File", command=import_queue)
+    label="Import", command=import_queue)
+url_queue_rightclickmenu.add_command(
+    label="Export", command=export_queue)
 url_queue_rightclickmenu.add_command(label="Clear", command=clear_queue)
 url_queue.bind("<Button-3>", url_queue_rightclick)
 
@@ -762,6 +846,8 @@ log_listbox.pack()
 
 log_rightclickmenu = Menu(url_entry, tearoff=False)
 log_rightclickmenu.add_command(
+    label="Save", command=save_logs)
+log_rightclickmenu.add_command(
     label="Clear", command=lambda: log_listbox.delete(0, END))
 log_listbox.bind(
     "<Button-3>", lambda e: log_rightclickmenu.tk_popup(e.x_root, e.y_root))
@@ -769,9 +855,10 @@ log_listbox.bind(
 log_info = IntVar(value=1)
 log_warn = IntVar(value=1)
 log_err = IntVar(value=1)
+log_verbose = IntVar(value=0)
 
 log_info_checkbox = ttk.Checkbutton(
-    log_frame, text="Information", variable=log_info)
+    log_frame, text="Information", variable=log_info, state=DISABLED)
 log_info_checkbox.pack(padx=5, side=LEFT)
 log_warnings_checkbox = ttk.Checkbutton(
     log_frame, text="Warnings", variable=log_warn)
@@ -779,8 +866,9 @@ log_warnings_checkbox.pack(padx=5, side=LEFT)
 log_error_checkbox = ttk.Checkbutton(
     log_frame, text="Errors", variable=log_err)
 log_error_checkbox.pack(padx=5, side=LEFT)
-log_active_label = ttk.Label(log_frame, text="Active Threads: 0")
-log_active_label.pack(side=RIGHT)
+log_verbose_checkbox = ttk.Checkbutton(
+    log_frame, text="Verbose", variable=log_verbose)
+log_verbose_checkbox.pack(padx=5, side=LEFT)
 
 download_button = ttk.Button(
     general_frame, text="Download", image=pixel, compound="c", width=63, command=download)
@@ -867,9 +955,24 @@ limits_agelimit_label.grid(padx=5, sticky=W, row=1, column=0)
 limits_viewrange_label = Label(limits_frame, text="View Count Range: ")
 limits_viewrange_label.grid(padx=5, sticky=W, row=2, column=0)
 
-limits_daterange_min_entry = ttk.Entry(limits_frame, width=18)
+limits_daterange_min_text = "From (YYYYMMDD)"
+limits_daterange_max_text = "To (YYYYMMDD)"
+
+limits_daterange_min_entry = ttk.Entry(
+    limits_frame, width=18, foreground="gray")
+limits_daterange_min_entry.insert(0, limits_daterange_min_text)
+limits_daterange_min_entry.bind("<FocusIn>", lambda e: on_entry_click(
+    limits_daterange_min_entry, limits_daterange_min_text))
+limits_daterange_min_entry.bind("<FocusOut>", lambda e: on_focus_out(
+    limits_daterange_min_entry, limits_daterange_min_text))
 limits_daterange_min_entry.grid(padx=5, sticky=E, row=0, column=1)
-limits_daterange_max_entry = ttk.Entry(limits_frame, width=18)
+limits_daterange_max_entry = ttk.Entry(
+    limits_frame, width=18, foreground="gray")
+limits_daterange_max_entry.insert(0, limits_daterange_max_text)
+limits_daterange_max_entry.bind("<FocusIn>", lambda e: on_entry_click(
+    limits_daterange_max_entry, limits_daterange_max_text))
+limits_daterange_max_entry.bind("<FocusOut>", lambda e: on_focus_out(
+    limits_daterange_max_entry, limits_daterange_max_text))
 limits_daterange_max_entry.grid(padx=5, sticky=E, row=0, column=2)
 limits_agelimit_entry = ttk.Entry(limits_frame, width=39)
 limits_agelimit_entry.grid(padx=5, sticky=E, row=1, column=1, columnspan=2)
@@ -889,6 +992,7 @@ outputpath_label.grid(padx=5, sticky=W, row=0, column=0)
 outputoptions_label = Label(output_frame, text="Output Options: ")
 outputoptions_label.grid(padx=5, sticky=W, row=1, column=0)
 outputpath_entry = ttk.Entry(output_frame, width=26)
+outputpath_entry.insert(0, os.path.abspath(os.getcwd()).replace(os.sep, '/'))
 outputpath_entry.grid(padx=5, sticky=E, row=0, column=1)
 outputpath_button = ttk.Button(
     output_frame, text="Browse", command=ui_insert_path)
