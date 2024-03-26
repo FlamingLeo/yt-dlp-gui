@@ -5,6 +5,8 @@ A graphical user interface for yt-dlp, made using Python and tkinter.
 - Install the requirements: `python3 -m pip install -r requirements.txt`
 - Run the application: `python3 main.py`
 
+**Note**: To make sure you always use the latest version of the required packages, I recommend using the python script instead of the built executable.
+
 # Notes
 This is a personal project I started a few years ago and left on hiatus sometime during 2022.
 It's not meant to replace any other GUI made by others for yt-dlp.
