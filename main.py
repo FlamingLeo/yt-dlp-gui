@@ -87,7 +87,7 @@ FIXUP_POLICIES = [
     'force'
 ]
 
-VERSION = "2.2"
+VERSION = "2.2_01"
 DATE = "27.03.2024"
 DUMMY_VIDEO = "https://www.youtube.com/watch?v=Vhh_GeBPOhs"
 CONCURRENT_LIMIT = 10
@@ -206,8 +206,8 @@ def export_queue():
         urls = url_queue.get_children()
         if urls != ():
             with open("queue.txt", "w") as file:
-                    for url in urls:
-                        file.write(url + "\n")
+                for url in urls:
+                    file.write(url + "\n")
     except:
         pass
 
@@ -725,6 +725,8 @@ queue_menu.add_command(label="Delete", command=lambda: delete_from_queue())
 queue_menu.add_command(label="Import", command=import_queue)
 queue_menu.add_command(label="Export", command=export_queue)
 queue_menu.add_command(label="Clear", command=clear_queue)
+queue_menu.add_separator()
+queue_menu.add_command(label="Download", command=download)
 
 logs_menu = Menu(menu_bar, tearoff=False)
 menu_bar.add_cascade(label="Logs", menu=logs_menu)
