@@ -88,7 +88,7 @@ FIXUP_POLICIES = [
 ]
 
 VERSION = "2.2"
-DATE = "26.03.2024"
+DATE = "27.03.2024"
 DUMMY_VIDEO = "https://www.youtube.com/watch?v=Vhh_GeBPOhs"
 CONCURRENT_LIMIT = 10
 
@@ -170,10 +170,15 @@ def add_to_queue(link=None):
     The queue cannot contain duplicate URLs.
     """
     url = (link if link != None else url_entry.get()).strip()
-    if validators.url(url) and not url_queue.exists(url):
-        hostname = '.'.join((urlparse(url).netloc).split('.')[-2:])
-        url_queue.insert("", END, iid=url, values=(url, hostname))
-        url_entry.delete(0, END)
+    if validators.url(url):
+        if not url_queue.exists(url):
+            hostname = '.'.join((urlparse(url).netloc).split('.')[-2:])
+            url_queue.insert("", END, iid=url, values=(url, hostname))
+            url_entry.delete(0, END)
+        else:
+            insert_into_log("[ERROR] URL already in queue!")
+    else:
+        insert_into_log("[ERROR] Invalid URL!")
 
 
 def delete_from_queue(selection=None):
