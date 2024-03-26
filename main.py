@@ -367,21 +367,21 @@ def get_date():
 
 def convert_to_number(value, fallback):
     """
-    Helper method to convert number with prefixes to integer.
+    Helper method to convert number with suffixes to integer.
     For example, 50K becomes 50.000, 1M becomes 1.000.000 and so on.
 
     If the function fails, it returns a fallback value.
     """
-    prefixes = {
+    suffixes = {
         'K': 10**3,
         'M': 10**6,
         'B': 10**9
     }
 
     try:
-        if value[-1].upper() in prefixes:
-            prefix = value[-1].upper()
-            number = float(value[:-1]) * prefixes[prefix]
+        if value[-1].upper() in suffixes:
+            suffix = value[-1].upper()
+            number = float(value[:-1]) * suffixes[suffix]
             return int(number)
         else:
             return int(value)
